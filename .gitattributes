@@ -1,0 +1,14 @@
+# Define o comportamento padrão para arquivos de texto (converte LF no repo, mas mantém o padrão do SO localmente)
+* text=auto
+
+# Arquivos Python
+*.py text diff=python
+*.pyc binary
+*.pyo binary
+*.pyd binary
+
+# Arquivos de configuração e dados
+*.json text
+*.xml text
+*.csv text
+*.md text
