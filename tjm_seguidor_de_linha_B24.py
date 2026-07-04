@@ -17,11 +17,11 @@ sensor_giro = GyroSensor(Port.S3)
 sensor_ultrasonico = UltrasonicSensor(Port.S4)
 
 #calibracao dos sensores
-preto_esq = 8
-branco_esq = 80
+preto_esq = 6
+branco_esq = 85
 
 preto_dir = 6.5
-branco_dir = 70
+branco_dir = 77
 
 def normalizar_esq(valor):
     denominador = branco_esq - preto_esq

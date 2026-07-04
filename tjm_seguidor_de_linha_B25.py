@@ -17,11 +17,11 @@ sensor_giro = GyroSensor(Port.S3)
 sensor_ultrasonico = UltrasonicSensor(Port.S4)
 
 #calibracao dos sensores
-preto_esq = 8
-branco_esq = 80
+preto_esq = 6    # 45 prata
+branco_esq = 88  #
 
-preto_dir = 6.5
-branco_dir = 70
+preto_dir = 6    # 
+branco_dir = 75  #
 
 def normalizar_esq(valor):
     denominador = branco_esq - preto_esq
@@ -97,6 +97,37 @@ def virar_bloco_sgiro(graus_bloco_giro, direcao_bloco_giro, potencia_do_giro):
     robot.stop()
     wait(200)
 
+def virar_bloco_sgiro_verde(graus_bloco_giro, direcao_bloco_giro, potencia_do_giro):
+    log_estado("Giro Verde")
+    robot.stop()
+    wait(200)
+    sensor_giro.reset_angle(0)
+    
+    limite_preto_linha = 15 #limite de refletividade normalizada para considerar linha preta encontrada
+    
+    if direcao_bloco_giro == "direita":
+        #se girando para a direita, o sensor fisico da direita (sensor_esquerda) eh o primeiro a tocar a linha
+        while abs(sensor_giro.angle()) < abs(graus_bloco_giro):
+            ref_dir = normalizar_dir(sensor_esquerda.reflection())
+            if ref_dir < limite_preto_linha:
+                log_estado("Linha Dir Ok")
+                break
+            robot.drive(0, potencia_do_giro)
+            wait(10)
+            
+    elif direcao_bloco_giro == "esquerda":
+        #se girando para a esquerda, o sensor fisico da esquerda (sensor_direita) eh o primeiro a tocar a linha
+        while abs(sensor_giro.angle()) < abs(graus_bloco_giro):
+            ref_esq = normalizar_esq(sensor_direita.reflection())
+            if ref_esq < limite_preto_linha:
+                log_estado("Linha Esq Ok")
+                break
+            robot.drive(0, -potencia_do_giro)
+            wait(10)
+            
+    robot.stop()
+    wait(200)
+
 def virar_180_bloco_sgiro(graus_bloco_giro, potencia_do_giro):
     log_estado("Girando 180 graus")
     robot.stop()
@@ -128,7 +159,7 @@ def desviar_obstaculo():
     
     virar_bloco_sgiro(90, "direita", 40)
 
-#inicializa o bloco EV3 e limpa a tela
+#inicia o bloco EV3 e limpa a tela
 log_estado("Iniciando robo")
 wait(800)
 
@@ -170,32 +201,27 @@ while True:
         ref_esq = sensor_esquerda.reflection()
         
         #filtro de reflexao
-        verde_dir = (cor_dir_confirm == Color.GREEN) and (4 <= ref_dir <= 9)
-        verde_esq = (cor_esq_confirm == Color.GREEN) and (4 <= ref_esq <= 9)
+        verde_dir = (cor_dir_confirm == Color.GREEN) and (4 <= ref_dir <= 10)
+        verde_esq = (cor_esq_confirm == Color.GREEN) and (4 <= ref_esq <= 10)
         
+        wait(50)
         if verde_dir and verde_esq:
-            wait(10)
-            if verde_dir and verde_esq:
-                log_estado("Verde Duplo 180")
-                virar_180_bloco_sgiro(180, 40)
+            log_estado("Verde Duplo 180")
+            virar_180_bloco_sgiro(175, 40)
             
         elif verde_dir:
-            wait(10)
-            if verde_dir:
-                log_estado("Verde Direita")
-                robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
-                wait(500)
-                robot.stop()
-                virar_bloco_sgiro(90, "esquerda", 40)
-            
+            log_estado("Verde Direita")
+            robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
+            wait(500)
+            robot.stop()
+            virar_bloco_sgiro_verde(90, "esquerda", 40)
+
         elif verde_esq:
-            wait(10)
-            if verde_esq:
-                log_estado("Verde Esquerda")
-                robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
-                wait(500)
-                robot.stop()
-                virar_bloco_sgiro(90, "direita", 40)
+            log_estado("Verde Esquerda")
+            robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
+            wait(500)
+            robot.stop()
+            virar_bloco_sgiro_verde(90, "direita", 40)
             
         cont_verde_dir = 0
         cont_verde_esq = 0

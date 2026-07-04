@@ -16,12 +16,16 @@ sensor_esquerda = ColorSensor(Port.S2) #fisicamente na Direita devido a inversao
 sensor_giro = GyroSensor(Port.S3)
 sensor_ultrasonico = UltrasonicSensor(Port.S4)
 
-#calibracao dos sensores
-preto_esq = 8
-branco_esq = 80
+#calibracao dos sensores #CALIBRAR
+preto_esq = 6    #
+branco_esq = 75  #
 
-preto_dir = 6.5
-branco_dir = 70
+preto_dir = 4   #
+branco_dir = 60  #
+
+#limiares para a linha prata do resgate (refletividade cinza de ~45% medida no tapete)
+limiar_prata_min = 38   # -7 do padrão
+limiar_prata_max = 52   # +7 do padrão
 
 def normalizar_esq(valor):
     denominador = branco_esq - preto_esq
@@ -36,8 +40,7 @@ def normalizar_dir(valor):
     return max(min((valor - preto_dir) * 70 / denominador, 70), 0)
 
 #parametros de velocidade e controle
-potencia = 60         #velocidade linear maxima nas retas
-velocidade_min = 35   #velocidade linear minima nas curvas para estabilidade
+potencia = 60  #velocidade linear maxima nas retas
 robot = DriveBase(motor_esquerda, motor_direita, wheel_diameter=64, axle_track=192)
 
 #parametros do PID (kp, ki, kd)
@@ -45,11 +48,13 @@ kp = 1.8
 ki = 0.01
 kd = 0.5
 
-#variaveis persistentes do controle PID e contadores de debugar verde
+#variaveis persistentes do controle PID e contadores de debugar verde/prata
 erro_anterior = 0
 integral = 10 #ref 0
 cont_verde_dir = 0
 cont_verde_esq = 0
+cont_prata = 0 #contador de ciclos consecutivos lendo prata
+resgate_pass = 0
 
 #controle de estado para depuracao sem sobrecarregar a tela do EV3
 estado_atual = None
@@ -97,6 +102,37 @@ def virar_bloco_sgiro(graus_bloco_giro, direcao_bloco_giro, potencia_do_giro):
     robot.stop()
     wait(200)
 
+def virar_bloco_sgiro_verde(graus_bloco_giro, direcao_bloco_giro, potencia_do_giro):
+    log_estado("Giro Verde")
+    robot.stop()
+    wait(200)
+    sensor_giro.reset_angle(0)
+    
+    limite_preto_linha = 15 #limite de refletividade normalizada para considerar linha preta encontrada
+    
+    if direcao_bloco_giro == "direita":
+        #se girando para a direita, o sensor fisico da direita (sensor_esquerda) eh o primeiro a tocar a linha
+        while abs(sensor_giro.angle()) < abs(graus_bloco_giro):
+            ref_dir = normalizar_dir(sensor_esquerda.reflection())
+            if ref_dir < limite_preto_linha:
+                log_estado("Linha Dir Ok")
+                break
+            robot.drive(0, potencia_do_giro)
+            wait(10)
+            
+    elif direcao_bloco_giro == "esquerda":
+        #se girando para a esquerda, o sensor fisico da esquerda (sensor_direita) eh o primeiro a tocar a linha
+        while abs(sensor_giro.angle()) < abs(graus_bloco_giro):
+            ref_esq = normalizar_esq(sensor_direita.reflection())
+            if ref_esq < limite_preto_linha:
+                log_estado("Linha Esq Ok")
+                break
+            robot.drive(0, -potencia_do_giro)
+            wait(10)
+            
+    robot.stop()
+    wait(200)
+
 def virar_180_bloco_sgiro(graus_bloco_giro, potencia_do_giro):
     log_estado("Girando 180 graus")
     robot.stop()
@@ -111,6 +147,32 @@ def virar_180_bloco_sgiro(graus_bloco_giro, potencia_do_giro):
     robot.stop()
     wait(100)
 
+def mover_ate_parede(potencia_motor, num_graus_max, limite_distancia_mm):
+    log_estado("Parede")
+    robot.stop()
+    motor_esquerda.reset_angle(0)
+    motor_direita.reset_angle(0)
+    
+    # Converte potencia (0-100) para velocidade regulada em graus por segundo
+    velocidade = abs(potencia_motor) * 9
+    if potencia_motor < 0:
+        velocidade = -velocidade
+        
+    # Aciona os motores de forma continua
+    motor_esquerda.run(velocidade)
+    motor_direita.run(velocidade)
+    
+    # Monitora ate que a distancia limite seja atingida ou o limite de graus seja estourado
+    while abs(motor_esquerda.angle()) < abs(num_graus_max):
+        dist = sensor_ultrasonico.distance()
+        if dist < limite_distancia_mm:
+            log_estado("Parede Ok")
+            break
+        wait(10)
+        
+    robot.stop()
+    wait(200)
+
 def desviar_obstaculo():
     log_estado("Obstaculo")
     
@@ -124,16 +186,30 @@ def desviar_obstaculo():
     
     virar_bloco_sgiro(90, "esquerda", 40)
 
-    mover_bloco_sgiro(40, 600)
+    mover_bloco_sgiro(40, 500)
     
     virar_bloco_sgiro(90, "direita", 40)
 
+def passar_resgate():
+    log_estado("Resgate")
+
+    mover_bloco_sgiro(40, 1900) 
+
+    virar_bloco_sgiro(90, "direita", 40)
+
+    # Avanca ate 3000 graus ou ate detectar a parede a 8 cm (80 mm)
+    mover_ate_parede(40, 3000, 80) 
+    
+    virar_bloco_sgiro(90, "esquerda", 40)
+
+    mover_bloco_sgiro(40, 1800)
+    
 #inicializa o bloco EV3 e limpa a tela
 log_estado("Iniciando robo")
 wait(800)
 
 while True:
-    if sensor_ultrasonico.distance() < 80:
+    if sensor_ultrasonico.distance() < 80 and resgate_pass == 1:
         desviar_obstaculo()
         erro_anterior = 0
         integral = 0
@@ -141,7 +217,26 @@ while True:
         
     cor_dir = sensor_direita.color()
     cor_esq = sensor_esquerda.color()
+    ref_dir_cru = sensor_direita.reflection()
+    ref_esq_cru = sensor_esquerda.reflection()
     
+    #atualiza contadores de cor prata (reflexao cinza intermediaria de ~45% medida no tapete)
+    if ((limiar_prata_min <= ref_dir_cru <= limiar_prata_max) and 
+        (limiar_prata_min <= ref_esq_cru <= limiar_prata_max) and 
+        (cor_dir not in (Color.GREEN, Color.RED) and cor_esq not in (Color.GREEN, Color.RED))):
+        cont_prata += 1
+    else:
+        cont_prata = 0
+        
+    #detecao de linha prata (entrada na area de resgate)
+    if cont_prata >= 5:
+        robot.stop()
+        log_estado("Prata")
+        ev3.speaker.beep()
+        resgate_pass = 1
+        wait(1000)
+        passar_resgate()
+        
     #converte leitura consecutiva de verde
     if cor_dir == Color.GREEN:
         cont_verde_dir += 1
@@ -157,6 +252,7 @@ while True:
     if cor_dir == Color.RED and cor_esq == Color.RED:
         robot.stop()
         log_estado("Vermelho")
+        ev3.speaker.beep()
         break
         
     #detecao de Verde cruzamentos/intersecoes
@@ -170,32 +266,28 @@ while True:
         ref_esq = sensor_esquerda.reflection()
         
         #filtro de reflexao
-        verde_dir = (cor_dir_confirm == Color.GREEN) and (4 <= ref_dir <= 9)
-        verde_esq = (cor_esq_confirm == Color.GREEN) and (4 <= ref_esq <= 9)
+        verde_dir = (cor_dir_confirm == Color.GREEN) and (4 <= ref_dir <= 10)
+        verde_esq = (cor_esq_confirm == Color.GREEN) and (4 <= ref_esq <= 10)
         
+        wait(50)
         if verde_dir and verde_esq:
-            wait(10)
-            if verde_dir and verde_esq:
-                log_estado("Verde Duplo 180")
-                virar_180_bloco_sgiro(180, 40)
-            
+            log_estado("Verde Duplo 180")
+            virar_180_bloco_sgiro(175, 40)
+        
+        #o verde da direita foi removido por questao de estrategia da pista
         elif verde_dir:
-            wait(10)
-            if verde_dir:
-                log_estado("Verde Direita")
-                robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
-                wait(500)
-                robot.stop()
-                virar_bloco_sgiro(90, "esquerda", 40)
-            
+             log_estado("Verde Direita")
+             robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
+             wait(500)
+             robot.stop()
+             virar_bloco_sgiro_verde(90, "esquerda", 40)
+
         elif verde_esq:
-            wait(10)
-            if verde_esq:
-                log_estado("Verde Esquerda")
-                robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
-                wait(500)
-                robot.stop()
-                virar_bloco_sgiro(90, "direita", 40)
+            log_estado("Verde Esquerda")
+            robot.drive(300, 0) # avanca reto usando robot.drive para evitar conflitos de controle
+            wait(500)
+            robot.stop()
+            virar_bloco_sgiro_verde(90, "direita", 40)
             
         cont_verde_dir = 0
         cont_verde_esq = 0
@@ -206,9 +298,9 @@ while True:
     else:
         log_estado("Seguindo Linha")
         #sensor_direita esta fisicamente na Esquerda
-        ref_sensor_direita = normalizar_esq(sensor_direita.reflection())
+        ref_sensor_direita = normalizar_esq(ref_dir_cru)
         #sensor_esquerda esta fisicamente na Direita
-        ref_sensor_esquerda = normalizar_dir(sensor_esquerda.reflection())
+        ref_sensor_esquerda = normalizar_dir(ref_esq_cru)
         
         #se o robo estiver no branco puro (gap), zera a integral para nao puxar para o lado
         if ref_sensor_direita > 55 and ref_sensor_esquerda > 55:
@@ -228,6 +320,6 @@ while True:
         #formula do PID para obter a correcao angular
         correcao = (kp * ref_erro) + (ki * integral) + (kd * derivada)
         
-        #driveBase com velocidade constante (B22)
+        #driveBase com velocidade constante
         robot.drive(potencia, correcao)
         wait(5)
