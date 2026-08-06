@@ -267,7 +267,7 @@ def ir_ate_vitima(velocidade=80, max_graus_aproximacao=800):
 
     motor_esquerda.reset_angle(0)
     motor_direita.reset_angle(0)
-    velocidade = 180
+    velocidade = 720
     motor_esquerda.run(velocidade)
     motor_direita.run(velocidade)
 
@@ -297,7 +297,7 @@ def garra_vitima(mov):
         while motor_garra.angle() < 10: #desce
             motor_garra.dc(80)
 
-    motor_garra.stop()
+    motor_garra.hold() #trava o motor na posição
     wait(500)
         
 def soltar_vitimas():
